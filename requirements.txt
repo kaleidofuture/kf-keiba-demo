@@ -1,0 +1,8 @@
+lightgbm==4.6.0
+shap==0.51.0
+streamlit==1.55.0
+plotly==6.4.0
+requests==2.32.5
+beautifulsoup4==4.14.2
+pandas
+scikit-learn
