@@ -432,26 +432,29 @@ with tab1:
                 if st.button("騎手名鑑", use_container_width=True):
                     _show_jockey_directory(df_raw)
             race_nums = sorted(df_raw["レース番号"].unique())
-            btn_cols = st.columns(6)
-            for i, rn in enumerate(race_nums):
-                rd = df_raw[df_raw["レース番号"] == rn].iloc[0]
-                full_name = rd['レース名']
-                label = f"R{rn}"
-                with btn_cols[i % 6]:
-                    if st.button(label, key=f"rn_{rn}", use_container_width=True, help=full_name):
-                        full_label = f"R{rn} {full_name}"
-                        df_race = df_raw[df_raw["レース番号"] == rn].copy()
-                        with st.spinner("分析中..."):
-                            try:
-                                df_pred = shutsuba_to_predict_df(df_race)
-                                model, features, explainer = load_model()
-                                df_result = predict_race(df_pred.copy(), model, features)
-                                st.session_state["shutsuba_result"] = df_result
-                                st.session_state["shutsuba_features"] = features
-                                st.session_state["shutsuba_explainer"] = explainer
-                                st.session_state["shutsuba_race_label"] = full_label
-                            except Exception as e:
-                                st.error(f"分析エラー: {e}")
+            n_cols = 4
+            for row_start in range(0, len(race_nums), n_cols):
+                btn_cols = st.columns(n_cols)
+                for col_idx, rn in enumerate(race_nums[row_start:row_start + n_cols]):
+                    rd = df_raw[df_raw["レース番号"] == rn].iloc[0]
+                    full_name = rd['レース名']
+                    short_name = full_name[:6] + "…" if len(full_name) > 6 else full_name
+                    label = f"R{rn} {short_name}"
+                    with btn_cols[col_idx]:
+                        if st.button(label, key=f"rn_{rn}", use_container_width=True, help=full_name):
+                            full_label = f"R{rn} {full_name}"
+                            df_race = df_raw[df_raw["レース番号"] == rn].copy()
+                            with st.spinner("分析中..."):
+                                try:
+                                    df_pred = shutsuba_to_predict_df(df_race)
+                                    model, features, explainer = load_model()
+                                    df_result = predict_race(df_pred.copy(), model, features)
+                                    st.session_state["shutsuba_result"] = df_result
+                                    st.session_state["shutsuba_features"] = features
+                                    st.session_state["shutsuba_explainer"] = explainer
+                                    st.session_state["shutsuba_race_label"] = full_label
+                                except Exception as e:
+                                    st.error(f"分析エラー: {e}")
 
             if "shutsuba_result" in st.session_state:
                 df_result = st.session_state["shutsuba_result"]
@@ -466,8 +469,21 @@ with tab1:
                 df_display = df_result.copy().reset_index(drop=True)
                 df_display["印"] = _assign_marks(df_display["win_score"].values)
                 df_display["勝率予測"] = df_display["win_score"].apply(lambda x: f"{x:.1f}%")
+                # 順位列を予測スコア順で付与
+                df_display["順位"] = range(1, len(df_display) + 1)
+                sort_mode = st.radio("並び順", ["馬番順", "予測順"], horizontal=True, label_visibility="collapsed")
+                if sort_mode == "馬番順" and "馬番" in df_display.columns:
+                    df_display = df_display.sort_values("馬番").reset_index(drop=True)
+                else:
+                    df_display = df_display.sort_values("win_score", ascending=False).reset_index(drop=True)
 
-                show_cols = ["印"]
+                show_cols = []
+                if "枠" in df_display.columns:
+                    show_cols.append("枠")
+                if "馬番" in df_display.columns:
+                    show_cols.append("馬番")
+                show_cols.append("順位")
+                show_cols.append("印")
                 if name_col:
                     show_cols.append(name_col)
                 show_cols.append("勝率予測")
@@ -488,8 +504,117 @@ with tab1:
                     df_show["前走_頭数"] = df_show["前走_頭数"].apply(lambda x: f"{int(x)}頭立" if pd.notna(x) and x > 0 else "-")
 
                 df_show.index = range(1, len(df_show) + 1)
-                df_show.index.name = "順位"
-                st.dataframe(df_show, use_container_width=True)
+
+                # 枠番カラー定義
+                WAKU_STYLE = {
+                    1: ("background:#fff;color:#333;border:1px solid #ccc", "白"),
+                    2: ("background:#333;color:#fff", "黒"),
+                    3: ("background:#e74c3c;color:#fff", "赤"),
+                    4: ("background:#3498db;color:#fff", "青"),
+                    5: ("background:#f1c40f;color:#333", "黄"),
+                    6: ("background:#27ae60;color:#fff", "緑"),
+                    7: ("background:#e67e22;color:#fff", "橙"),
+                    8: ("background:#e91e9b;color:#fff", "桃"),
+                }
+
+                # === プロフェッショナルHTMLテーブル ===
+                top_score = df_show["勝率予測"].str.rstrip("%").astype(float).max() if "勝率予測" in df_show.columns else 100
+
+                html = """<style>
+                @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+JP:wght@400;500;700&display=swap');
+                .rt{width:100%;border-collapse:separate;border-spacing:0;font-family:'Inter','Noto Sans JP',system-ui,sans-serif;font-size:13px;border-radius:8px;overflow:hidden;box-shadow:0 0 0 1px rgba(0,0,0,.06),0 2px 8px rgba(0,0,0,.04)}
+                .rt thead th{padding:0;margin:0;height:0;border:none;overflow:hidden;line-height:0;font-size:0}
+                .rt .rth{display:flex;align-items:center;background:linear-gradient(135deg,#1a1f36 0%,#252b48 100%);padding:0 4px}
+                .rt .rth span{display:inline-block;padding:11px 4px;color:rgba(255,255,255,.45);font-size:10px;font-weight:600;letter-spacing:1.2px;text-transform:uppercase;text-align:center;white-space:nowrap}
+                .rt tbody tr{transition:all .15s ease}
+                .rt tbody tr:hover{background:rgba(37,136,116,.04)}
+                .rt tbody tr:nth-child(even){background:rgba(0,0,0,.015)}
+                .rt tbody tr:nth-child(even):hover{background:rgba(37,136,116,.04)}
+                .rt td{padding:10px 6px;border-bottom:1px solid rgba(0,0,0,.04);vertical-align:middle;font-variant-numeric:tabular-nums}
+
+                .wk{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:4px;font-weight:700;font-size:11px;line-height:1;box-shadow:0 1px 2px rgba(0,0,0,.1)}
+                .wk1{background:#f5f5f5;color:#444;box-shadow:0 1px 2px rgba(0,0,0,.08),inset 0 0 0 1px rgba(0,0,0,.12)}
+                .wk2{background:#2c2c2c;color:#fff}
+                .wk3{background:#c0392b;color:#fff}
+                .wk4{background:#2471a3;color:#fff}
+                .wk5{background:#f0c929;color:#1a1a1a}
+                .wk6{background:#1e8449;color:#fff}
+                .wk7{background:#d35400;color:#fff}
+                .wk8{background:#c2185b;color:#fff}
+
+                .rk{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;padding:0 4px;border-radius:10px;font-weight:700;font-size:10px}
+                .rk1{background:linear-gradient(135deg,#1a8870,#21a88a);color:#fff}
+                .rk2{background:linear-gradient(135deg,#3a9e8e,#4db8a4);color:#fff}
+                .rk3{background:linear-gradient(135deg,#6bb5a8,#82c9bd);color:#fff}
+                .rkn{background:none;color:#bbb;font-weight:500}
+
+                .mk{text-align:center;font-weight:800;font-size:16px;line-height:1}
+                .mkh{color:#c0392b}.mkt{color:#d35400}.mks{color:#2471a3}.mkr{color:#999}
+
+                .hn{font-weight:600;color:#1a1f36;font-size:13px;white-space:nowrap;letter-spacing:-.2px}
+                .jk{color:#888;font-size:11.5px;white-space:nowrap}
+
+                .sc-wrap{display:flex;align-items:center;gap:6px}
+                .sc-bar{flex:1;height:4px;background:rgba(0,0,0,.04);border-radius:2px;overflow:hidden;min-width:40px}
+                .sc-fill{height:100%;border-radius:2px;transition:width .3s ease}
+                .sc-val{font-weight:700;font-size:13px;white-space:nowrap;min-width:38px;text-align:right}
+                .sc-hi{color:#1a8870}.sc-hi .sc-fill{background:linear-gradient(90deg,#1a8870,#21a88a)}
+                .sc-md{color:#1a1f36}.sc-md .sc-fill{background:#a0aec0}
+                .sc-lo{color:#ccc}.sc-lo .sc-fill{background:#e2e8f0}
+
+                .sub{color:#999;font-size:11.5px;text-align:center}
+                .num{text-align:center;color:#666;font-weight:500}
+                </style>"""
+
+                # ヘッダー行（flexで幅制御）
+                col_labels = {"枠":"枠","馬番":"番","順位":"#","印":"印","馬名":"馬名","勝率予測":"勝率予測",
+                              "騎手":"騎手","馬齢":"齢","出走数":"戦","勝率":"通算","前走_着順":"前走","前走_人気":"人気","前走_頭数":"頭数"}
+                col_widths = {"枠":"34px","馬番":"30px","順位":"30px","印":"26px","馬名":"2fr","勝率予測":"3fr",
+                              "騎手":"1.5fr","馬齢":"26px","出走数":"34px","勝率":"44px","前走_着順":"38px","前走_人気":"56px","前走_頭数":"48px"}
+
+                grid_cols = " ".join(col_widths.get(c, "1fr") for c in df_show.columns)
+                header_html = '<div class="rth" style="display:grid;grid-template-columns:' + grid_cols + ';gap:2px">'
+                for col in df_show.columns:
+                    header_html += f'<span>{col_labels.get(col, col)}</span>'
+                header_html += '</div>'
+
+                html += '<table class="rt"><thead><tr><th>' + header_html + '</th></tr></thead><tbody>'
+
+                MARK_CLS = {"◎":"mkh","○":"mkt","▲":"mks","△":"mkr"}
+
+                for _, row in df_show.iterrows():
+                    row_html = '<tr><td><div style="display:grid;grid-template-columns:' + grid_cols + ';gap:2px;align-items:center">'
+                    for col in df_show.columns:
+                        val = row[col]
+                        if col == "枠":
+                            w = int(val) if pd.notna(val) and val != 0 else 0
+                            row_html += f'<div style="text-align:center"><span class="wk wk{w}">{w}</span></div>' if w > 0 else '<div style="text-align:center">-</div>'
+                        elif col == "馬番":
+                            row_html += f'<div class="num">{int(val)}</div>'
+                        elif col == "順位":
+                            r = int(val)
+                            cls = f"rk{r}" if r <= 3 else "rkn"
+                            row_html += f'<div style="text-align:center"><span class="rk {cls}">{r}</span></div>'
+                        elif col == "印":
+                            cls = MARK_CLS.get(str(val), "")
+                            row_html += f'<div class="mk {cls}">{val}</div>'
+                        elif col == "馬名":
+                            row_html += f'<div><span class="hn">{val}</span></div>'
+                        elif col == "騎手":
+                            row_html += f'<div><span class="jk">{val}</span></div>'
+                        elif col == "勝率予測":
+                            sv = float(str(val).rstrip("%"))
+                            pct = min(sv / top_score * 100, 100)
+                            cls = "sc-hi" if sv >= top_score * 0.7 else ("sc-md" if sv >= top_score * 0.3 else "sc-lo")
+                            row_html += f'<div class="sc-wrap {cls}"><span class="sc-val">{val}</span><div class="sc-bar"><div class="sc-fill" style="width:{pct:.0f}%"></div></div></div>'
+                        elif col == "馬齢":
+                            row_html += f'<div class="num">{int(val) if pd.notna(val) else "-"}</div>'
+                        else:
+                            row_html += f'<div class="sub">{val}</div>'
+                    row_html += '</div></td></tr>'
+                    html += row_html
+                html += '</tbody></table>'
+                st.markdown(html, unsafe_allow_html=True)
 
                 # 馬の詳細をボタンで表示
                 st.caption("馬名をクリックすると詳細を表示")

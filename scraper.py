@@ -306,7 +306,7 @@ def shutsuba_to_predict_df(df: pd.DataFrame) -> pd.DataFrame:
 
     # そのままコピーする列
     direct_cols = [
-        "馬名", "レース番号", "レース名", "コース距離", "競馬場名",
+        "枠", "馬番", "馬名", "レース番号", "レース名", "コース距離", "競馬場名",
         "前走_着順", "前走_人気", "前走_頭数", "前走_距離",
         "前走_タイム", "前走_馬体重", "前走_上がり3F",
         "2走前_着順", "2走前_人気",
@@ -315,6 +315,26 @@ def shutsuba_to_predict_df(df: pd.DataFrame) -> pd.DataFrame:
     for col in direct_cols:
         if col in df.columns:
             out[col] = df[col]
+
+    # 馬番を数値に変換
+    if "馬番" in out.columns:
+        out["馬番"] = pd.to_numeric(out["馬番"], errors="coerce").fillna(0).astype(int)
+
+    # 馬番から枠番を計算（頭数に応じた割り当て）
+    if "馬番" in out.columns:
+        n_horses = len(out)
+        def calc_waku(umaban, n):
+            if umaban <= 0 or n <= 0:
+                return 0
+            if n <= 8:
+                return umaban
+            # 9頭以上: 後ろの枠から2頭ずつ割り当て
+            extra = n - 8  # 2頭枠の数
+            single = 8 - extra  # 1頭枠の数
+            if umaban <= single:
+                return umaban
+            return single + (umaban - single + 1) // 2
+        out["枠"] = out["馬番"].apply(lambda x: calc_waku(x, n_horses))
 
     # リネームが必要な列
     if "騎手名" in df.columns:
